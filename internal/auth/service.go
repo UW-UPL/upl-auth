@@ -1,0 +1,225 @@
+package auth
+
+import (
+	"database/sql"
+	"fmt"
+	"log"
+	"strings"
+	"time"
+
+	"go-forth/internal/constants"
+	"go-forth/internal/discord"
+	"go-forth/internal/models"
+
+	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/oauth2"
+)
+
+type Service struct {
+	db            *sql.DB
+	discordClient *discord.Client
+	oauth         *OAuthConfig
+	jwtSecret     []byte
+}
+
+type Config interface {
+	GetGoogleClientID() string
+	GetGoogleClientSecret() string
+	GetJWTSecret() string
+	GetBaseURL() string
+}
+
+func NewService(db *sql.DB, discordClient *discord.Client, config Config) *Service {
+	oauth := NewOAuthConfig(
+		config.GetGoogleClientID(),
+		config.GetGoogleClientSecret(),
+		config.GetBaseURL(),
+	)
+
+	return &Service{
+		db:            db,
+		discordClient: discordClient,
+		oauth:         oauth,
+		jwtSecret:     []byte(config.GetJWTSecret()),
+	}
+}
+
+func (s *Service) GetOAuthURL(state string) string {
+	return s.oauth.AuthCodeURL(state, oauth2.AccessTypeOffline)
+}
+
+func (s *Service) CreateOrUpdateUser(googleUser *models.GoogleUserInfo) (*models.User, error) {
+	user, err := s.getUserByGoogleID(googleUser.ID)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, fmt.Errorf("failed to get user: %w", err)
+	}
+
+	if err == sql.ErrNoRows {
+		return s.createUser(googleUser)
+	}
+
+	return user, nil
+}
+
+func (s *Service) getUserByID(userID int) (*models.User, error) {
+	user := &models.User{}
+	query := `
+		SELECT id, email, first_name, last_name, google_id, discord_id, status, created_at, approved_at, approved_by
+		FROM users WHERE id = $1
+	`
+	err := s.db.QueryRow(query, userID).Scan(
+		&user.ID, &user.Email, &user.FirstName, &user.LastName,
+		&user.GoogleID, &user.DiscordID, &user.Status, &user.CreatedAt, &user.ApprovedAt, &user.ApprovedBy,
+	)
+	return user, err
+}
+
+func (s *Service) GenerateJWT(user *models.User) (string, error) {
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"user_id":    user.ID,
+		"email":      user.Email,
+		"first_name": user.FirstName,
+		"last_name":  user.LastName,
+		"status":     user.Status,
+		"exp":        time.Now().Add(time.Hour * 24 * constants.JWTExpirationDays).Unix(),
+	})
+
+	return token.SignedString(s.jwtSecret)
+}
+
+func (s *Service) VerifyJWT(tokenString string) (*jwt.Token, error) {
+	return jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return s.jwtSecret, nil
+	})
+}
+
+func (s *Service) LinkDiscordAccount(userID int, discordID string) error {
+	query := `UPDATE users SET discord_id = $1 WHERE id = $2`
+	_, err := s.db.Exec(query, discordID, userID)
+	if err != nil {
+		return fmt.Errorf("failed to link discord account: %w", err)
+	}
+
+	if s.discordClient.IsConfigured() {
+		if err := s.discordClient.AssignRole(discordID); err != nil {
+			log.Printf("Failed to assign Discord role to %s: %v", discordID, err)
+			return fmt.Errorf("failed to assign discord role: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (s *Service) GetPendingUsers() ([]models.User, error) {
+	query := `
+		SELECT id, email, first_name, last_name, google_id, discord_id, status, created_at, approved_at, approved_by
+		FROM users WHERE status = $1
+		ORDER BY created_at DESC
+	`
+	rows, err := s.db.Query(query, constants.StatusPending)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query pending users: %w", err)
+	}
+	defer rows.Close()
+
+	var users []models.User
+	for rows.Next() {
+		var user models.User
+		err := rows.Scan(&user.ID, &user.Email, &user.FirstName, &user.LastName,
+			&user.GoogleID, &user.DiscordID, &user.Status, &user.CreatedAt, &user.ApprovedAt, &user.ApprovedBy)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan user: %w", err)
+		}
+		users = append(users, user)
+	}
+
+	return users, nil
+}
+
+func (s *Service) UpdateUserStatus(userID int, status string, approvedBy string) error {
+	query := `
+		UPDATE users
+		SET status = $1, approved_at = $2, approved_by = $3
+		WHERE id = $4
+	`
+	var approvedAt *time.Time
+	if status == constants.StatusApproved {
+		now := time.Now()
+		approvedAt = &now
+	}
+
+	_, err := s.db.Exec(query, status, approvedAt, approvedBy, userID)
+	if err != nil {
+		return fmt.Errorf("failed to update user status: %w", err)
+	}
+
+	return nil
+}
+
+func (s *Service) saveDiscordIDForUser(userID int, discordID string) error {
+	query := `UPDATE users SET discord_id = $1 WHERE id = $2`
+	_, err := s.db.Exec(query, discordID, userID)
+	if err != nil {
+		return fmt.Errorf("failed to save discord ID: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) isWiscEmail(email string) bool {
+	return strings.HasSuffix(strings.ToLower(email), constants.WiscEduDomain)
+}
+
+func (s *Service) getUserByGoogleID(googleID string) (*models.User, error) {
+	user := &models.User{}
+	query := `
+		SELECT id, email, first_name, last_name, google_id, discord_id, status, created_at, approved_at, approved_by
+		FROM users WHERE google_id = $1
+	`
+	err := s.db.QueryRow(query, googleID).Scan(
+		&user.ID, &user.Email, &user.FirstName, &user.LastName,
+		&user.GoogleID, &user.DiscordID, &user.Status, &user.CreatedAt, &user.ApprovedAt, &user.ApprovedBy,
+	)
+	return user, err
+}
+
+func (s *Service) createUser(googleUser *models.GoogleUserInfo) (*models.User, error) {
+	status := constants.StatusPending
+	var approvedAt *time.Time
+	var approvedBy *string
+
+	if s.isWiscEmail(googleUser.Email) {
+		status = constants.StatusApproved
+		now := time.Now()
+		approvedAt = &now
+		approvedByStr := constants.AutoApprovedBy
+		approvedBy = &approvedByStr
+		log.Printf("Auto-approved wisc.edu user: %s", googleUser.Email)
+	}
+
+	user := &models.User{
+		Email:      googleUser.Email,
+		FirstName:  googleUser.GivenName,
+		LastName:   googleUser.FamilyName,
+		GoogleID:   googleUser.ID,
+		Status:     status,
+		ApprovedAt: approvedAt,
+		ApprovedBy: approvedBy,
+	}
+
+	query := `
+		INSERT INTO users (email, first_name, last_name, google_id, discord_id, status, approved_at, approved_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		RETURNING id, created_at
+	`
+	err := s.db.QueryRow(query, user.Email, user.FirstName, user.LastName,
+		user.GoogleID, user.DiscordID, user.Status, user.ApprovedAt, user.ApprovedBy).Scan(&user.ID, &user.CreatedAt)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to create user: %w", err)
+	}
+
+	return user, nil
+}
