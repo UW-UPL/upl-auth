@@ -21,8 +21,8 @@ UPL AUTH SYSTEM
     <p><strong>AWAITING AUTHORIZATION</strong></p>
 
     <div class="details">
-        USER: {{.Email}}<br>
-        NAME: {{.FirstName}} {{.LastName}}<br>
+        {{if .Email}}{{if ne .Email "Your application"}}USER: {{.Email}}<br>{{end}}{{end}}
+        {{if .FirstName}}NAME: {{.FirstName}} {{.LastName}}<br>{{end}}
         STATUS: PENDING REVIEW<br>
         ESTIMATED WAIT: 24-48 HOURS
     </div>

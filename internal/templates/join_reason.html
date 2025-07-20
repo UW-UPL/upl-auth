@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Join Reason Required</title>
+    <style>
+        body { font-family: monospace; max-width: 600px; margin: 40px auto; padding: 20px; }
+        pre { border: 1px solid #000; padding: 20px; }
+        h1 { text-align: center; }
+        .details { background: #f0f0f0; padding: 10px; margin: 20px 0; }
+        textarea { width: 100%; min-height: 150px; padding: 10px; margin: 10px 0; font-family: monospace; }
+        button { padding: 10px 20px; margin: 10px 0; cursor: pointer; }
+        .error { color: #c00; margin: 10px 0; }
+        .char-count { text-align: right; color: #666; font-size: 0.9em; }
+    </style>
+</head>
+<body>
+    <pre>
+UPL AUTH SYSTEM
+===============
+    </pre>
+
+    <h1>JOIN REASON REQUIRED</h1>
+
+    <div class="details">
+        USER: {{.Email}}<br>
+        NAME: {{.FirstName}} {{.LastName}}<br>
+        STATUS: PENDING REVIEW
+    </div>
+
+    <p><strong>Please explain why you want to join the UPL Discord server:</strong></p>
+
+    <textarea id="joinReason" placeholder="Tell us about your interest in UPL, your background, and why you'd like to join our community..."></textarea>
+    <div class="char-count"><span id="charCount">0</span> / 1000 characters</div>
+
+    <div id="error" class="error" style="display: none;"></div>
+
+    <button onclick="submitReason()">Submit</button>
+
+    <script>
+        const userID = {{.UserID}};
+        const textarea = document.getElementById('joinReason');
+        const charCount = document.getElementById('charCount');
+        const errorDiv = document.getElementById('error');
+
+        textarea.addEventListener('input', () => {
+            const length = textarea.value.length;
+            charCount.textContent = length;
+            if (length > 1000) {
+                charCount.style.color = '#c00';
+            } else {
+                charCount.style.color = '#666';
+            }
+        });
+
+        async function submitReason() {
+            const reason = textarea.value.trim();
+
+            if (reason.length < 10) {
+                errorDiv.textContent = 'Please provide at least 10 characters';
+                errorDiv.style.display = 'block';
+                return;
+            }
+
+            if (reason.length > 1000) {
+                errorDiv.textContent = 'Please keep your response under 1000 characters';
+                errorDiv.style.display = 'block';
+                return;
+            }
+
+            try {
+                const response = await fetch('/auth/submit-reason', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        user_id: userID,
+                        join_reason: reason
+                    })
+                });
+
+                if (response.ok) {
+                    window.location.href = '/auth/callback?pending=true';
+                } else {
+                    const data = await response.json();
+                    errorDiv.textContent = data.error || 'Failed to submit';
+                    errorDiv.style.display = 'block';
+                }
+            } catch (error) {
+                errorDiv.textContent = 'Network error. Please try again.';
+                errorDiv.style.display = 'block';
+            }
+        }
+    </script>
+</body>
+</html>

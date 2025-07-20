@@ -24,3 +24,7 @@ func InternalServerError(c *gin.Context, message string) {
 func NotFound(c *gin.Context, message string) {
 	c.JSON(http.StatusNotFound, gin.H{"error": message})
 }
+
+func TooManyRequests(c *gin.Context, message string) {
+	c.JSON(http.StatusTooManyRequests, gin.H{"error": message})
+}

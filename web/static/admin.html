@@ -8,6 +8,7 @@
         pre { border: 1px solid #000; padding: 20px; }
         h1, h2 { text-align: center; }
         .user { border: 1px solid #ccc; padding: 10px; margin: 10px 0; background: #f9f9f9; }
+        .join-reason { margin: 10px 0; padding: 10px; background: #fff; border-left: 3px solid #666; }
         button { margin: 5px; padding: 5px 10px; }
         .status { padding: 10px; margin: 10px 0; }
         .error { background: #fee; color: #c00; }
@@ -76,6 +77,9 @@ UPL AUTH SYSTEM - ADMIN
                     document.getElementById('loginSection').style.display = 'none';
                     document.getElementById('adminSection').style.display = 'block';
                     loadPendingUsers();
+                } else if (response.status === 429) {
+                    errorDiv.textContent = 'Too many attempts. Please try again later.';
+                    errorDiv.style.display = 'block';
                 } else {
                     errorDiv.textContent = 'Invalid password';
                     errorDiv.style.display = 'block';
@@ -131,6 +135,7 @@ UPL AUTH SYSTEM - ADMIN
                         Email: ${user.email}<br>
                         Name: ${user.first_name} ${user.last_name}<br>
                         Registered: ${new Date(user.created_at).toLocaleString()}<br>
+                        ${user.join_reason ? `<div class="join-reason"><strong>Join Reason:</strong><br>${escapeHtml(user.join_reason)}</div>` : ''}
                         <button onclick="updateUser(${user.id}, 'approved')">Approve</button>
                         <button onclick="updateUser(${user.id}, 'rejected')">Reject</button>
                     </div>
@@ -141,6 +146,12 @@ UPL AUTH SYSTEM - ADMIN
                 list.innerHTML = '<p>Error loading users</p>';
                 showStatus(`Error: ${error.message}`, true);
             }
+        };
+
+        const escapeHtml = (text) => {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         };
 
         const updateUser = async (userId, status) => {

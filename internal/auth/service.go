@@ -58,18 +58,19 @@ func (s *Service) CreateOrUpdateUser(googleUser *models.GoogleUserInfo) (*models
 		return s.createUser(googleUser)
 	}
 
+	// for existing pending users, ensure we return their current state including join_reason
 	return user, nil
 }
 
 func (s *Service) getUserByID(userID int) (*models.User, error) {
 	user := &models.User{}
 	query := `
-		SELECT id, email, first_name, last_name, google_id, discord_id, status, created_at, approved_at, approved_by
+		SELECT id, email, first_name, last_name, google_id, discord_id, status, join_reason, created_at, approved_at, approved_by
 		FROM users WHERE id = $1
 	`
 	err := s.db.QueryRow(query, userID).Scan(
 		&user.ID, &user.Email, &user.FirstName, &user.LastName,
-		&user.GoogleID, &user.DiscordID, &user.Status, &user.CreatedAt, &user.ApprovedAt, &user.ApprovedBy,
+		&user.GoogleID, &user.DiscordID, &user.Status, &user.JoinReason, &user.CreatedAt, &user.ApprovedAt, &user.ApprovedBy,
 	)
 	return user, err
 }
@@ -97,9 +98,22 @@ func (s *Service) VerifyJWT(tokenString string) (*jwt.Token, error) {
 }
 
 func (s *Service) LinkDiscordAccount(userID int, discordID string) error {
+	var existingUserID int
+	checkQuery := `SELECT id FROM users WHERE discord_id = $1 AND id != $2`
+	err := s.db.QueryRow(checkQuery, discordID, userID).Scan(&existingUserID)
+
+	if err == nil {
+		return fmt.Errorf("discord account already linked to another user")
+	} else if err != sql.ErrNoRows {
+		return fmt.Errorf("failed to check existing discord link: %w", err)
+	}
+
 	query := `UPDATE users SET discord_id = $1 WHERE id = $2`
-	_, err := s.db.Exec(query, discordID, userID)
+	_, err = s.db.Exec(query, discordID, userID)
 	if err != nil {
+		if strings.Contains(err.Error(), "duplicate key value violates unique constraint") {
+			return fmt.Errorf("discord account already linked to another user")
+		}
 		return fmt.Errorf("failed to link discord account: %w", err)
 	}
 
@@ -115,7 +129,7 @@ func (s *Service) LinkDiscordAccount(userID int, discordID string) error {
 
 func (s *Service) GetPendingUsers() ([]models.User, error) {
 	query := `
-		SELECT id, email, first_name, last_name, google_id, discord_id, status, created_at, approved_at, approved_by
+		SELECT id, email, first_name, last_name, google_id, discord_id, status, join_reason, created_at, approved_at, approved_by
 		FROM users WHERE status = $1
 		ORDER BY created_at DESC
 	`
@@ -129,7 +143,7 @@ func (s *Service) GetPendingUsers() ([]models.User, error) {
 	for rows.Next() {
 		var user models.User
 		err := rows.Scan(&user.ID, &user.Email, &user.FirstName, &user.LastName,
-			&user.GoogleID, &user.DiscordID, &user.Status, &user.CreatedAt, &user.ApprovedAt, &user.ApprovedBy)
+			&user.GoogleID, &user.DiscordID, &user.Status, &user.JoinReason, &user.CreatedAt, &user.ApprovedAt, &user.ApprovedBy)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan user: %w", err)
 		}
@@ -160,27 +174,68 @@ func (s *Service) UpdateUserStatus(userID int, status string, approvedBy string)
 }
 
 func (s *Service) saveDiscordIDForUser(userID int, discordID string) error {
+	var existingUser struct {
+		ID    int
+		Email string
+	}
+	checkQuery := `SELECT id, email FROM users WHERE discord_id = $1 AND id != $2`
+	err := s.db.QueryRow(checkQuery, discordID, userID).Scan(&existingUser.ID, &existingUser.Email)
+
+	if err == nil {
+		log.Printf("Discord ID %s already linked to user %d (%s), cannot link to user %d",
+			discordID, existingUser.ID, existingUser.Email, userID)
+		return fmt.Errorf("discord account already linked to another user")
+	} else if err != sql.ErrNoRows {
+		return fmt.Errorf("failed to check existing discord link: %w", err)
+	}
+
 	query := `UPDATE users SET discord_id = $1 WHERE id = $2`
-	_, err := s.db.Exec(query, discordID, userID)
+	_, err = s.db.Exec(query, discordID, userID)
 	if err != nil {
+		if strings.Contains(err.Error(), "duplicate key value violates unique constraint") {
+			return fmt.Errorf("discord account already linked to another user")
+		}
 		return fmt.Errorf("failed to save discord ID: %w", err)
 	}
 	return nil
 }
 
+func (s *Service) updateUserJoinReason(userID int, joinReason string) error {
+	query := `UPDATE users SET join_reason = $1 WHERE id = $2`
+	_, err := s.db.Exec(query, joinReason, userID)
+	if err != nil {
+		return fmt.Errorf("failed to update join reason: %w", err)
+	}
+	return nil
+}
+
 func (s *Service) isWiscEmail(email string) bool {
-	return strings.HasSuffix(strings.ToLower(email), constants.WiscEduDomain)
+	lowercaseEmail := strings.ToLower(email)
+	return strings.HasSuffix(lowercaseEmail, "@wisc.edu") || strings.HasSuffix(lowercaseEmail, "@cs.wisc.edu")
+}
+
+func (s *Service) getUserByDiscordID(discordID string) (*models.User, error) {
+	user := &models.User{}
+	query := `
+		SELECT id, email, first_name, last_name, google_id, discord_id, status, join_reason, created_at, approved_at, approved_by
+		FROM users WHERE discord_id = $1
+	`
+	err := s.db.QueryRow(query, discordID).Scan(
+		&user.ID, &user.Email, &user.FirstName, &user.LastName,
+		&user.GoogleID, &user.DiscordID, &user.Status, &user.JoinReason, &user.CreatedAt, &user.ApprovedAt, &user.ApprovedBy,
+	)
+	return user, err
 }
 
 func (s *Service) getUserByGoogleID(googleID string) (*models.User, error) {
 	user := &models.User{}
 	query := `
-		SELECT id, email, first_name, last_name, google_id, discord_id, status, created_at, approved_at, approved_by
+		SELECT id, email, first_name, last_name, google_id, discord_id, status, join_reason, created_at, approved_at, approved_by
 		FROM users WHERE google_id = $1
 	`
 	err := s.db.QueryRow(query, googleID).Scan(
 		&user.ID, &user.Email, &user.FirstName, &user.LastName,
-		&user.GoogleID, &user.DiscordID, &user.Status, &user.CreatedAt, &user.ApprovedAt, &user.ApprovedBy,
+		&user.GoogleID, &user.DiscordID, &user.Status, &user.JoinReason, &user.CreatedAt, &user.ApprovedAt, &user.ApprovedBy,
 	)
 	return user, err
 }
@@ -210,12 +265,12 @@ func (s *Service) createUser(googleUser *models.GoogleUserInfo) (*models.User, e
 	}
 
 	query := `
-		INSERT INTO users (email, first_name, last_name, google_id, discord_id, status, approved_at, approved_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO users (email, first_name, last_name, google_id, discord_id, status, join_reason, approved_at, approved_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id, created_at
 	`
 	err := s.db.QueryRow(query, user.Email, user.FirstName, user.LastName,
-		user.GoogleID, user.DiscordID, user.Status, user.ApprovedAt, user.ApprovedBy).Scan(&user.ID, &user.CreatedAt)
+		user.GoogleID, user.DiscordID, user.Status, user.JoinReason, user.ApprovedAt, user.ApprovedBy).Scan(&user.ID, &user.CreatedAt)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create user: %w", err)

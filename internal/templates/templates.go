@@ -36,6 +36,13 @@ type ErrorData struct {
 	Message string
 }
 
+type JoinReasonData struct {
+	Email     string
+	FirstName string
+	LastName  string
+	UserID    int
+}
+
 func RenderSuccess(c *gin.Context, data SuccessData) {
 	c.Header("Content-Type", "text/html")
 	c.Status(http.StatusOK)
@@ -56,6 +63,14 @@ func RenderError(c *gin.Context, data ErrorData) {
 	c.Header("Content-Type", "text/html")
 	c.Status(http.StatusOK)
 	if err := templates.ExecuteTemplate(c.Writer, "error.html", data); err != nil {
+		c.String(http.StatusInternalServerError, "Template error")
+	}
+}
+
+func RenderJoinReason(c *gin.Context, data JoinReasonData) {
+	c.Header("Content-Type", "text/html")
+	c.Status(http.StatusOK)
+	if err := templates.ExecuteTemplate(c.Writer, "join_reason.html", data); err != nil {
 		c.String(http.StatusInternalServerError, "Template error")
 	}
 }

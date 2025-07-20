@@ -49,6 +49,7 @@ volumes:
 ```bash
 BASE_URL=https://yourdomain.com
 ADMIN_PASSWORD=your-password
+ADMIN_PASSWORD_SALT=your-password-salt
 JWT_SECRET=any-32-char-string
 GOOGLE_CLIENT_ID=from-google-console
 GOOGLE_CLIENT_SECRET=from-google-console

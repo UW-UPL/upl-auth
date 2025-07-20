@@ -2,9 +2,14 @@ package auth
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
+	"database/sql"
+	"encoding/hex"
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 	"os"
 	"fmt"
@@ -17,12 +22,49 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+type rateLimiter struct {
+	mu       sync.Mutex
+	attempts map[string][]time.Time
+}
+
+func newRateLimiter() *rateLimiter {
+	return &rateLimiter{
+		attempts: make(map[string][]time.Time),
+	}
+}
+
+func (rl *rateLimiter) checkLimit(key string, limit int, window time.Duration) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	cutoff := now.Add(-window)
+
+	var validAttempts []time.Time
+	for _, attempt := range rl.attempts[key] {
+		if attempt.After(cutoff) {
+			validAttempts = append(validAttempts, attempt)
+		}
+	}
+
+	if len(validAttempts) >= limit {
+		rl.attempts[key] = validAttempts
+		return false
+	}
+
+	rl.attempts[key] = append(validAttempts, now)
+	return true
+}
+
+var adminRateLimiter = newRateLimiter()
+
 func (s *Service) RegisterRoutes(router *gin.Engine) {
 	auth := router.Group(constants.AuthRouteGroup)
 	{
 		auth.GET(constants.LoginRoute, s.handleLogin)
 		auth.GET(constants.CallbackRoute, s.handleCallback)
 		auth.POST(constants.LinkDiscordRoute, s.handleLinkDiscord)
+		auth.POST("/submit-reason", s.handleSubmitReason)
 	}
 
 	admin := router.Group(constants.AdminRouteGroup)
@@ -70,6 +112,16 @@ func (s *Service) handleLogin(c *gin.Context) {
 }
 
 func (s *Service) handleCallback(c *gin.Context) {
+	if c.Query("pending") == "true" {
+		// This is a redirect after submitting join reason, just show generic pending message
+		templates.RenderPending(c, templates.PendingData{
+			Email:     "Your application",
+			FirstName: "",
+			LastName:  "",
+		})
+		return
+	}
+
 	stateParam := c.Query("state")
 	stateCookie, cookieErr := c.Cookie(constants.OAuthStateCookieName)
 
@@ -111,10 +163,28 @@ func (s *Service) handleCallback(c *gin.Context) {
 		return
 	}
 
+	// Check if Discord ID is already taken before creating user
+	if discordID != "" {
+		existingUser, err := s.getUserByDiscordID(discordID)
+		if err == nil {
+			log.Printf("Discord ID %s already linked to user %d (%s), cannot create new user", discordID, existingUser.ID, existingUser.Email)
+			templates.RenderError(c, templates.ErrorData{Message: constants.MsgDiscordDuplicate})
+			return
+		} else if err != sql.ErrNoRows {
+			log.Printf("Error checking Discord ID: %v", err)
+			templates.RenderError(c, templates.ErrorData{Message: "Failed to verify Discord account"})
+			return
+		}
+	}
+
 	user, err := s.CreateOrUpdateUser(googleUser)
 	if err != nil {
 		log.Printf("CreateOrUpdateUser error: %v", err)
 		if discordID != "" {
+			if strings.Contains(err.Error(), "email already registered") {
+				templates.RenderError(c, templates.ErrorData{Message: "This email address is already registered with another Discord account."})
+				return
+			}
 			templates.RenderError(c, templates.ErrorData{Message: constants.MsgCreateUserError})
 			return
 		}
@@ -139,6 +209,23 @@ func (s *Service) handleCallback(c *gin.Context) {
 			} else {
 				log.Printf("Saved Discord ID %s for pending user %d (%s)", discordID, user.ID, user.Email)
 			}
+
+
+			isWisc := s.isWiscEmail(user.Email)
+			hasReason := user.JoinReason != nil && *user.JoinReason != ""
+			log.Printf("User %s - isWisc: %v, hasReason: %v, JoinReason: %v", user.Email, isWisc, hasReason, user.JoinReason)
+
+			if !isWisc && !hasReason {
+				log.Printf("Non-wisc.edu user %s (%d) needs join reason", user.Email, user.ID)
+				templates.RenderJoinReason(c, templates.JoinReasonData{
+					Email:     user.Email,
+					FirstName: user.FirstName,
+					LastName:  user.LastName,
+					UserID:    user.ID,
+				})
+				return
+			}
+
 			templates.RenderPending(c, templates.PendingData{
 				Email:     user.Email,
 				FirstName: user.FirstName,
@@ -158,6 +245,13 @@ func (s *Service) handleCallback(c *gin.Context) {
 
 	case constants.StatusApproved:
 		if discordID != "" {
+			// Check if this user already has a different Discord ID linked
+			if user.DiscordID != nil && *user.DiscordID != "" && *user.DiscordID != discordID {
+				log.Printf("User %d already has Discord ID %s, cannot change to %s", user.ID, *user.DiscordID, discordID)
+				templates.RenderError(c, templates.ErrorData{Message: "This account is already linked to a different Discord ID."})
+				return
+			}
+
 			err := s.LinkDiscordAccount(user.ID, discordID)
 			if err != nil {
 				log.Printf("Failed to link Discord account for user %d: %v", user.ID, err)
@@ -197,6 +291,31 @@ func (s *Service) handleCallback(c *gin.Context) {
 		errors.InternalServerError(c, constants.MsgUnknownStatus)
 		return
 	}
+}
+
+func (s *Service) handleSubmitReason(c *gin.Context) {
+	var req struct {
+		UserID     int    `json:"user_id" binding:"required"`
+		JoinReason string `json:"join_reason" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		errors.BadRequest(c, "Invalid request")
+		return
+	}
+
+	if len(req.JoinReason) < 10 || len(req.JoinReason) > 1000 {
+		errors.BadRequest(c, "Join reason must be between 10 and 1000 characters")
+		return
+	}
+
+	err := s.updateUserJoinReason(req.UserID, req.JoinReason)
+	if err != nil {
+		errors.InternalServerError(c, "Failed to update join reason")
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Join reason submitted successfully"})
 }
 
 func (s *Service) handleLinkDiscord(c *gin.Context) {
@@ -325,17 +444,29 @@ func (s *Service) requireAdminAuth() gin.HandlerFunc {
 }
 
 func (s *Service) handleAdminLogin(c *gin.Context) {
+	clientIP := c.ClientIP()
+
+	if !adminRateLimiter.checkLimit(clientIP, 5, 15*time.Minute) {
+		time.Sleep(2 * time.Second)
+		errors.TooManyRequests(c, "Too many login attempts")
+		return
+	}
+
 	var req struct {
 		Password string `json:"password" binding:"required"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
+		time.Sleep(500 * time.Millisecond)
 		errors.BadRequest(c, "Invalid request")
 		return
 	}
 
-	adminPassword := s.getAdminPassword()
-	if req.Password != adminPassword {
+	adminPasswordHash := s.getAdminPasswordHash()
+	providedPasswordHash := s.hashPassword(req.Password)
+
+	if subtle.ConstantTimeCompare([]byte(adminPasswordHash), []byte(providedPasswordHash)) != 1 {
+		time.Sleep(500 * time.Millisecond)
 		errors.Unauthorized(c, "Invalid password")
 		return
 	}
@@ -359,17 +490,32 @@ func (s *Service) handleAdminLogout(c *gin.Context) {
 }
 
 func (s *Service) isValidAdminToken(token string) bool {
-	return token == s.generateAdminToken()
+	expectedToken := s.generateAdminToken()
+	return subtle.ConstantTimeCompare([]byte(token), []byte(expectedToken)) == 1
 }
 
 func (s *Service) generateAdminToken() string {
-	return fmt.Sprintf("admin-%s", s.getAdminPassword())
+	passwordHash := s.getAdminPasswordHash()
+	return fmt.Sprintf("admin-%s", passwordHash)
 }
 
-func (s *Service) getAdminPassword() string {
+func (s *Service) hashPassword(password string) string {
+	hash := sha256.Sum256([]byte(password + s.getPasswordSalt()))
+	return hex.EncodeToString(hash[:])
+}
+
+func (s *Service) getAdminPasswordHash() string {
 	password := os.Getenv("ADMIN_PASSWORD")
 	if password == "" {
 		log.Fatal("ADMIN_PASSWORD environment variable is required")
 	}
-	return password
+	return s.hashPassword(password)
+}
+
+func (s *Service) getPasswordSalt() string {
+	salt := os.Getenv("ADMIN_PASSWORD_SALT")
+	if salt == "" {
+		log.Fatal("ADMIN_PASSWORD_SALT environment variable is required")
+	}
+	return salt
 }

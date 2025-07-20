@@ -15,6 +15,7 @@ func Migrate(db *sql.DB) error {
 		google_id VARCHAR(100) UNIQUE NOT NULL,
 		discord_id VARCHAR(100) UNIQUE,
 		status VARCHAR(20) DEFAULT 'pending',
+		join_reason TEXT,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		approved_at TIMESTAMP,
 		approved_by VARCHAR(255)
