@@ -107,15 +107,3 @@ docker-compose -f docker-compose.dev.yml up --build
 go build -o server ./cmd/server
 go build -o bot ./cmd/discord-bot
 ```
-
-## Technology Stack
-
-**Go** - Fast, simple, single binary deployment
-**PostgreSQL** - Handles concurrent access
-**discordgo** - Native Go Discord library
-**Gin** - Minimal web framework
-**Docker** - Containerized deployment
-
---
-
-*Built for the [Undergraduate Projects Lab (UPL)](https://github.com/UW-UPL) at UW-Madison to keep our Discord server limited to actual UW students while staying open to alumni and friends of the lab.*
