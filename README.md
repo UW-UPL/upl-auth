@@ -1,5 +1,8 @@
 # go-forth
 
+[![Docker](https://github.com/nicosalm/go-forth/actions/workflows/docker.yml/badge.svg)](https://github.com/nicosalm/go-forth/actions/workflows/docker.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 Discord authentication via OAuth for community members
 
 ## What is this?
