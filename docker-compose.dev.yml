@@ -1,20 +1,12 @@
 services:
   app:
-    image: ghcr.io/uw-upl/upl-discord-auth:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "8080:8080"
-    env_file: .env
-    environment:
-      - DATABASE_URL=postgres://postgres:password@db:5432/go_forth?sslmode=disable
-    depends_on:
-      db:
-        condition: service_healthy
-    restart: unless-stopped
-
-  discord-bot:
-    image: ghcr.io/uw-upl/upl-discord-auth:latest
-    command: ["./bot"]
-    env_file: .env
+    env_file:
+      - .env
     environment:
       - DATABASE_URL=postgres://postgres:password@db:5432/go_forth?sslmode=disable
     depends_on:
@@ -35,6 +27,20 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  discord-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["./bot"]
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgres://postgres:password@db:5432/go_forth?sslmode=disable
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   postgres_data:
