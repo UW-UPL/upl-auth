@@ -15,20 +15,22 @@ import (
 )
 
 type Config struct {
-	GoogleClientID     string
-	GoogleClientSecret string
+	OAuthClientID     string
+	OAuthClientSecret string
 	JWTSecret         string
 	DatabaseURL       string
 	BaseURL           string
-	DiscordBotToken   string
+	DiscordToken      string
 	DiscordGuildID    string
 	DiscordRoleID     string
+	AutoApproveDomains string
 }
 
-func (c *Config) GetGoogleClientID() string     { return c.GoogleClientID }
-func (c *Config) GetGoogleClientSecret() string { return c.GoogleClientSecret }
+func (c *Config) GetOAuthClientID() string     { return c.OAuthClientID }
+func (c *Config) GetOAuthClientSecret() string { return c.OAuthClientSecret }
 func (c *Config) GetJWTSecret() string         { return c.JWTSecret }
 func (c *Config) GetBaseURL() string           { return c.BaseURL }
+func (c *Config) GetAutoApproveDomains() string { return c.AutoApproveDomains }
 
 func main() {
 	config := loadConfig()
@@ -39,10 +41,10 @@ func main() {
 	}
 	defer db.Close()
 
-	discordClient := discord.NewClient(config.DiscordBotToken, config.DiscordGuildID, config.DiscordRoleID)
+	discordClient := discord.NewClient(config.DiscordToken, config.DiscordGuildID, config.DiscordRoleID)
 	authService := auth.NewService(db, discordClient, config)
 
-	dg, err := discordgo.New(constants.DiscordBotPrefix + config.DiscordBotToken)
+	dg, err := discordgo.New(constants.DiscordBotPrefix + config.DiscordToken)
 	if err != nil {
 		log.Fatal("Error creating Discord session: ", err)
 	}
@@ -70,7 +72,7 @@ func main() {
 	commands := []*discordgo.ApplicationCommand{
 		{
 			Name:        "verify",
-			Description: "Verify your UW student status with Google OAuth",
+			Description: "Verify your identity with OAuth",
 		},
 	}
 
@@ -109,18 +111,19 @@ func main() {
 
 func loadConfig() *Config {
 	config := &Config{
-		GoogleClientID:     getEnv("GOOGLE_CLIENT_ID", ""),
-		GoogleClientSecret: getEnv("GOOGLE_CLIENT_SECRET", ""),
+		OAuthClientID:     getEnv("OAUTH_CLIENT_ID", ""),
+		OAuthClientSecret: getEnv("OAUTH_CLIENT_SECRET", ""),
 		JWTSecret:         getEnv("JWT_SECRET", ""),
-		DatabaseURL:       getEnv("DATABASE_URL", "postgres://postgres:password@localhost:5432/discord_auth?sslmode=disable"),
+		DatabaseURL:       getEnv("DATABASE_URL", "postgres://postgres:password@localhost:5432/go_forth?sslmode=disable"),
 		BaseURL:           getEnv("BASE_URL", "http://localhost:8080"),
-		DiscordBotToken:   getEnv("DISCORD_BOT_TOKEN", ""),
+		DiscordToken:      getEnv("DISCORD_TOKEN", ""),
 		DiscordGuildID:    getEnv("DISCORD_GUILD_ID", ""),
 		DiscordRoleID:     getEnv("DISCORD_ROLE_ID", ""),
+		AutoApproveDomains: getEnv("AUTO_APPROVE_DOMAINS", ""),
 	}
 
-	if config.DiscordBotToken == "" {
-		log.Fatal("DISCORD_BOT_TOKEN environment variable is required")
+	if config.DiscordToken == "" {
+		log.Fatal("DISCORD_TOKEN environment variable is required")
 	}
 	if config.DiscordGuildID == "" {
 		log.Fatal("DISCORD_GUILD_ID environment variable is required")
@@ -160,13 +163,13 @@ func (h *BotHandler) HandleVerifyCommand(s *discordgo.Session, i *discordgo.Inte
 	log.Printf("Generated verification URL for %s (ID: %s)", discordUsername, discordID)
 
 	embed := &discordgo.MessageEmbed{
-		Title:       "UPL Verification",
-		Description: "Click the link below to verify your UPL identity with Google:",
+		Title:       "Identity Verification",
+		Description: "Click the link below to verify your identity:",
 		Color:       0x0066cc,
 		Fields: []*discordgo.MessageEmbedField{
 			{
 				Name:   "What happens next?",
-				Value:  "1. Click the verification link\n2. Sign in with your Google account\n3. Get automatically verified and receive your role!",
+				Value:  "1. Click the verification link\n2. Sign in with your account\n3. Get automatically verified and receive your role!",
 				Inline: false,
 			},
 			{
@@ -176,7 +179,7 @@ func (h *BotHandler) HandleVerifyCommand(s *discordgo.Session, i *discordgo.Inte
 			},
 		},
 		Footer: &discordgo.MessageEmbedFooter{
-			Text: "UPL Discord Authentication",
+			Text: "Discord Authentication",
 		},
 	}
 
@@ -189,7 +192,7 @@ func (h *BotHandler) HandleVerifyCommand(s *discordgo.Session, i *discordgo.Inte
 					Components: []discordgo.MessageComponent{
 						discordgo.Button{
 							Style: discordgo.LinkButton,
-							Label: "Verify with Google",
+							Label: "Verify Identity",
 							URL:   authURL,
 						},
 					},

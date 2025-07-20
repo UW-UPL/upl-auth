@@ -44,7 +44,7 @@ func (o *OAuthConfig) GenerateState() (string, error) {
 	return base64.URLEncoding.EncodeToString(b), nil
 }
 
-func (o *OAuthConfig) GetUserInfo(ctx context.Context, code string) (*models.GoogleUserInfo, error) {
+func (o *OAuthConfig) GetUserInfo(ctx context.Context, code string) (*models.OAuthUserInfo, error) {
 	token, err := o.Exchange(ctx, code)
 	if err != nil {
 		return nil, fmt.Errorf("failed to exchange code: %w", err)
@@ -58,10 +58,10 @@ func (o *OAuthConfig) GetUserInfo(ctx context.Context, code string) (*models.Goo
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("google API error: status %d", resp.StatusCode)
+		return nil, fmt.Errorf("oauth API error: status %d", resp.StatusCode)
 	}
 
-	var userInfo models.GoogleUserInfo
+	var userInfo models.OAuthUserInfo
 	if err := json.NewDecoder(resp.Body).Decode(&userInfo); err != nil {
 		return nil, fmt.Errorf("failed to decode user info: %w", err)
 	}

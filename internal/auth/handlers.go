@@ -113,7 +113,6 @@ func (s *Service) handleLogin(c *gin.Context) {
 
 func (s *Service) handleCallback(c *gin.Context) {
 	if c.Query("pending") == "true" {
-		// this is a redirect after submitting join reason -- just show generic pending message
 		templates.RenderPending(c, templates.PendingData{
 			Email:     "Your application",
 			FirstName: "",
@@ -152,18 +151,17 @@ func (s *Service) handleCallback(c *gin.Context) {
 		log.Printf("Processing Discord verification for Discord ID: %s", discordID)
 	}
 
-	googleUser, err := s.oauth.GetUserInfo(context.Background(), code)
+	oauthUser, err := s.oauth.GetUserInfo(context.Background(), code)
 	if err != nil {
 		log.Printf("OAuth GetUserInfo error: %v", err)
 		if discordID != "" {
-			templates.RenderError(c, templates.ErrorData{Message: constants.MsgGoogleError})
+			templates.RenderError(c, templates.ErrorData{Message: constants.MsgOAuthError})
 			return
 		}
 		errors.InternalServerError(c, "Failed to get user information")
 		return
 	}
 
-	// check for if Discord ID is already taken before creating user
 	if discordID != "" {
 		existingUser, err := s.getUserByDiscordID(discordID)
 		if err == nil {
@@ -181,12 +179,12 @@ func (s *Service) handleCallback(c *gin.Context) {
 		}
 	}
 
-	user, err := s.CreateOrUpdateUser(googleUser)
+	user, err := s.CreateOrUpdateUser(oauthUser)
 	if err != nil {
 		log.Printf("CreateOrUpdateUser error: %v", err)
 		if discordID != "" {
 			if strings.Contains(err.Error(), "email already registered") {
-				templates.RenderError(c, templates.ErrorData{Message: "This email address is already registered with another Google account."})
+				templates.RenderError(c, templates.ErrorData{Message: "This email address is already registered with another account."})
 				return
 			}
 			if strings.Contains(err.Error(), "email has been rejected") {
@@ -218,13 +216,12 @@ func (s *Service) handleCallback(c *gin.Context) {
 				log.Printf("Saved Discord ID %s for pending user %d (%s)", discordID, user.ID, user.Email)
 			}
 
-
-			isWisc := s.isWiscEmail(user.Email)
+			isAutoApprove := s.isAutoApproveEmail(user.Email)
 			hasReason := user.JoinReason != nil && *user.JoinReason != ""
-			log.Printf("User %s - isWisc: %v, hasReason: %v, JoinReason: %v", user.Email, isWisc, hasReason, user.JoinReason)
+			log.Printf("User %s - isAutoApprove: %v, hasReason: %v, JoinReason: %v", user.Email, isAutoApprove, hasReason, user.JoinReason)
 
-			if !isWisc && !hasReason {
-				log.Printf("Non-wisc.edu user %s (%d) needs join reason", user.Email, user.ID)
+			if !isAutoApprove && !hasReason {
+				log.Printf("Non-auto-approve user %s (%d) needs join reason", user.Email, user.ID)
 				templates.RenderJoinReason(c, templates.JoinReasonData{
 					Email:     user.Email,
 					FirstName: user.FirstName,
@@ -253,7 +250,6 @@ func (s *Service) handleCallback(c *gin.Context) {
 
 	case constants.StatusApproved:
 		if discordID != "" {
-			// check if this user already has a different Discord ID linked
 			if user.DiscordID != nil && *user.DiscordID != "" && *user.DiscordID != discordID {
 				log.Printf("User %d already has Discord ID %s, cannot change to %s", user.ID, *user.DiscordID, discordID)
 				templates.RenderError(c, templates.ErrorData{Message: "This account is already linked to a different Discord ID."})
@@ -523,7 +519,7 @@ func (s *Service) getAdminPasswordHash() string {
 func (s *Service) getPasswordSalt() string {
 	salt := os.Getenv("ADMIN_PASSWORD_SALT")
 	if salt == "" {
-		log.Fatal("ADMIN_PASSWORD environment variable is required")
+		log.Fatal("ADMIN_PASSWORD_SALT environment variable is required")
 	}
 	return salt
 }

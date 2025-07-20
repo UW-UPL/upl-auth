@@ -1,19 +1,39 @@
 # go-forth
 
-Discord authentication via Google OAuth for UPL members
+Discord authentication via OAuth for community members
 
-## Setup
+## What is this?
 
-1. Create `docker-compose.yml`:
+A Discord bot that verifies community members and gives them roles in Discord servers. Users prove their identity by logging in with their OAuth account (Google, etc).
+
+## Deployment
+
+**You only need two files to deploy this system:**
+
+1. Create `.env`:
+```bash
+BASE_URL=https://yourdomain.com
+ADMIN_PASSWORD=your-secure-password
+ADMIN_PASSWORD_SALT=your-unique-salt-string
+JWT_SECRET=your-32-character-jwt-secret-key
+OAUTH_CLIENT_ID=your-oauth-client-id
+OAUTH_CLIENT_SECRET=your-oauth-client-secret
+DISCORD_TOKEN=your-discord-bot-token
+DISCORD_GUILD_ID=your-discord-server-id
+DISCORD_ROLE_ID=role-id-to-assign
+AUTO_APPROVE_DOMAINS=@example.edu,@company.com
+```
+
+2. Create `docker-compose.yml`:
 ```yaml
 services:
   app:
-    image: ghcr.io/nicosalm/upl-auth:latest
+    image: ghcr.io/nicosalm/go-forth:latest
     ports:
       - "8080:8080"
     env_file: .env
     environment:
-      - DATABASE_URL=postgres://postgres:password@db:5432/discord_auth?sslmode=disable
+      - DATABASE_URL=postgres://postgres:password@db:5432/go_forth?sslmode=disable
     depends_on:
       db:
         condition: service_healthy
@@ -21,7 +41,7 @@ services:
   db:
     image: postgres:15-alpine
     environment:
-      - POSTGRES_DB=discord_auth
+      - POSTGRES_DB=go_forth
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=password
     volumes:
@@ -33,29 +53,17 @@ services:
       retries: 5
 
   discord-bot:
-    image: ghcr.io/nicosalm/upl-auth-bot:latest
+    image: ghcr.io/nicosalm/go-forth:latest
+    command: ["./bot"]
     env_file: .env
     environment:
-      - DATABASE_URL=postgres://postgres:password@db:5432/discord_auth?sslmode=disable
+      - DATABASE_URL=postgres://postgres:password@db:5432/go_forth?sslmode=disable
     depends_on:
       db:
         condition: service_healthy
 
 volumes:
   postgres_data:
-```
-
-2. Create `.env`:
-```bash
-BASE_URL=https://yourdomain.com
-ADMIN_PASSWORD=your-password
-ADMIN_PASSWORD_SALT=your-password-salt
-JWT_SECRET=any-32-char-string
-GOOGLE_CLIENT_ID=from-google-console
-GOOGLE_CLIENT_SECRET=from-google-console
-DISCORD_BOT_TOKEN=from-discord-dev-portal
-DISCORD_GUILD_ID=your-server-id
-DISCORD_ROLE_ID=role-to-assign
 ```
 
 3. Run:
@@ -65,13 +73,49 @@ docker-compose up -d
 
 ## Usage
 
-- Users: Type `/verify` in Discord
-- Admins: Visit `/admin` with your password
+**Users:** Type `/verify` in Discord → Click the link → Sign in → Get role assigned
+**Admins:** Visit `/admin` → Enter password → Approve/reject pending users
 
-## Google OAuth
+## Configuration
 
-Add callback URL in Google Console: `https://yourdomain.com/auth/callback`
+**OAuth Provider:** Add callback URL: `https://yourdomain.com/auth/callback`
+**Discord Bot:** Needs "Manage Roles" permission
+**Auto-approve:** Set `AUTO_APPROVE_DOMAINS` for instant approval of specific email domains
 
-## Discord Bot
+## Security Features
 
-Needs Manage Roles permission and must be above the role it assigns.
+- One Discord account per person
+- One email per person
+- Rejected users stay rejected
+- Rate limiting on admin login
+- Secure password comparison
+- JWT token authentication
+
+---
+
+## Development
+
+**Local development:**
+```bash
+git clone https://github.com/nicosalm/go-forth
+cd go-forth
+docker-compose -f docker-compose.dev.yml up --build
+```
+
+**Build from source:**
+```bash
+go build -o server ./cmd/server
+go build -o bot ./cmd/discord-bot
+```
+
+## Technology Stack
+
+**Go** - Fast, simple, single binary deployment
+**PostgreSQL** - Handles concurrent access
+**discordgo** - Native Go Discord library
+**Gin** - Minimal web framework
+**Docker** - Containerized deployment
+
+--
+
+*Built for the [Undergraduate Projects Lab (UPL)](https://github.com/UW-UPL) at UW-Madison to keep our Discord server limited to actual UW students while staying open to alumni and friends of the lab.*

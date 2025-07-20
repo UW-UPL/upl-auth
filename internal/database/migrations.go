@@ -12,7 +12,7 @@ func Migrate(db *sql.DB) error {
 		email VARCHAR(255) UNIQUE NOT NULL,
 		first_name VARCHAR(100) NOT NULL,
 		last_name VARCHAR(100) NOT NULL,
-		google_id VARCHAR(100) UNIQUE NOT NULL,
+		oauth_id VARCHAR(100) UNIQUE NOT NULL,
 		discord_id VARCHAR(100) UNIQUE,
 		status VARCHAR(20) DEFAULT 'pending',
 		join_reason TEXT,
@@ -22,7 +22,7 @@ func Migrate(db *sql.DB) error {
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
-	CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id);
+	CREATE INDEX IF NOT EXISTS idx_users_oauth_id ON users(oauth_id);
 	CREATE INDEX IF NOT EXISTS idx_users_discord_id ON users(discord_id);
 	CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
 	`

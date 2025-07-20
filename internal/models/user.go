@@ -7,7 +7,7 @@ type User struct {
 	Email       string    `json:"email" db:"email"`
 	FirstName   string    `json:"first_name" db:"first_name"`
 	LastName    string    `json:"last_name" db:"last_name"`
-	GoogleID    string    `json:"google_id" db:"google_id"`
+	OAuthID     string    `json:"oauth_id" db:"oauth_id"`
 	DiscordID   *string   `json:"discord_id,omitempty" db:"discord_id"`
 	Status      string    `json:"status" db:"status"`
 	JoinReason  *string   `json:"join_reason,omitempty" db:"join_reason"`
@@ -16,7 +16,7 @@ type User struct {
 	ApprovedBy  *string   `json:"approved_by,omitempty" db:"approved_by"`
 }
 
-type GoogleUserInfo struct {
+type OAuthUserInfo struct {
 	ID            string `json:"id"`
 	Email         string `json:"email"`
 	VerifiedEmail bool   `json:"verified_email"`

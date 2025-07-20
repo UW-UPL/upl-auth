@@ -20,27 +20,38 @@ type Service struct {
 	discordClient *discord.Client
 	oauth         *OAuthConfig
 	jwtSecret     []byte
+	autoApproveDomains []string
 }
 
 type Config interface {
-	GetGoogleClientID() string
-	GetGoogleClientSecret() string
+	GetOAuthClientID() string
+	GetOAuthClientSecret() string
 	GetJWTSecret() string
 	GetBaseURL() string
+	GetAutoApproveDomains() string
 }
 
 func NewService(db *sql.DB, discordClient *discord.Client, config Config) *Service {
 	oauth := NewOAuthConfig(
-		config.GetGoogleClientID(),
-		config.GetGoogleClientSecret(),
+		config.GetOAuthClientID(),
+		config.GetOAuthClientSecret(),
 		config.GetBaseURL(),
 	)
+
+	var autoApproveDomains []string
+	if domains := config.GetAutoApproveDomains(); domains != "" {
+		autoApproveDomains = strings.Split(domains, ",")
+		for i, domain := range autoApproveDomains {
+			autoApproveDomains[i] = strings.TrimSpace(domain)
+		}
+	}
 
 	return &Service{
 		db:            db,
 		discordClient: discordClient,
 		oauth:         oauth,
 		jwtSecret:     []byte(config.GetJWTSecret()),
+		autoApproveDomains: autoApproveDomains,
 	}
 }
 
@@ -48,29 +59,28 @@ func (s *Service) GetOAuthURL(state string) string {
 	return s.oauth.AuthCodeURL(state, oauth2.AccessTypeOffline)
 }
 
-func (s *Service) CreateOrUpdateUser(googleUser *models.GoogleUserInfo) (*models.User, error) {
-	user, err := s.getUserByGoogleID(googleUser.ID)
+func (s *Service) CreateOrUpdateUser(oauthUser *models.OAuthUserInfo) (*models.User, error) {
+	user, err := s.getUserByOAuthID(oauthUser.ID)
 	if err != nil && err != sql.ErrNoRows {
 		return nil, fmt.Errorf("failed to get user: %w", err)
 	}
 
 	if err == sql.ErrNoRows {
-		return s.createUser(googleUser)
+		return s.createUser(oauthUser)
 	}
 
-	// for existing pending users, ensure we return their current state including join_reason
 	return user, nil
 }
 
 func (s *Service) getUserByID(userID int) (*models.User, error) {
 	user := &models.User{}
 	query := `
-		SELECT id, email, first_name, last_name, google_id, discord_id, status, join_reason, created_at, approved_at, approved_by
+		SELECT id, email, first_name, last_name, oauth_id, discord_id, status, join_reason, created_at, approved_at, approved_by
 		FROM users WHERE id = $1
 	`
 	err := s.db.QueryRow(query, userID).Scan(
 		&user.ID, &user.Email, &user.FirstName, &user.LastName,
-		&user.GoogleID, &user.DiscordID, &user.Status, &user.JoinReason, &user.CreatedAt, &user.ApprovedAt, &user.ApprovedBy,
+		&user.OAuthID, &user.DiscordID, &user.Status, &user.JoinReason, &user.CreatedAt, &user.ApprovedAt, &user.ApprovedBy,
 	)
 	return user, err
 }
@@ -129,7 +139,7 @@ func (s *Service) LinkDiscordAccount(userID int, discordID string) error {
 
 func (s *Service) GetPendingUsers() ([]models.User, error) {
 	query := `
-		SELECT id, email, first_name, last_name, google_id, discord_id, status, join_reason, created_at, approved_at, approved_by
+		SELECT id, email, first_name, last_name, oauth_id, discord_id, status, join_reason, created_at, approved_at, approved_by
 		FROM users WHERE status = $1
 		ORDER BY created_at DESC
 	`
@@ -143,7 +153,7 @@ func (s *Service) GetPendingUsers() ([]models.User, error) {
 	for rows.Next() {
 		var user models.User
 		err := rows.Scan(&user.ID, &user.Email, &user.FirstName, &user.LastName,
-			&user.GoogleID, &user.DiscordID, &user.Status, &user.JoinReason, &user.CreatedAt, &user.ApprovedAt, &user.ApprovedBy)
+			&user.OAuthID, &user.DiscordID, &user.Status, &user.JoinReason, &user.CreatedAt, &user.ApprovedAt, &user.ApprovedBy)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan user: %w", err)
 		}
@@ -154,13 +164,11 @@ func (s *Service) GetPendingUsers() ([]models.User, error) {
 }
 
 func (s *Service) UpdateUserStatus(userID int, status string, approvedBy string) error {
-	// first check current status
 	currentUser, err := s.getUserByID(userID)
 	if err != nil {
 		return fmt.Errorf("failed to get user: %w", err)
 	}
 
-	// prevent changing status if already rejected
 	if currentUser.Status == constants.StatusRejected && status == constants.StatusApproved {
 		return fmt.Errorf("cannot approve a rejected user")
 	}
@@ -220,68 +228,77 @@ func (s *Service) updateUserJoinReason(userID int, joinReason string) error {
 	return nil
 }
 
-func (s *Service) isWiscEmail(email string) bool {
+func (s *Service) isAutoApproveEmail(email string) bool {
+	if len(s.autoApproveDomains) == 0 {
+		return false
+	}
+
 	lowercaseEmail := strings.ToLower(email)
-	return strings.HasSuffix(lowercaseEmail, "@wisc.edu") || strings.HasSuffix(lowercaseEmail, "@cs.wisc.edu")
+	for _, domain := range s.autoApproveDomains {
+		if strings.HasSuffix(lowercaseEmail, strings.ToLower(domain)) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) getUserByDiscordID(discordID string) (*models.User, error) {
 	user := &models.User{}
 	query := `
-		SELECT id, email, first_name, last_name, google_id, discord_id, status, join_reason, created_at, approved_at, approved_by
+		SELECT id, email, first_name, last_name, oauth_id, discord_id, status, join_reason, created_at, approved_at, approved_by
 		FROM users WHERE discord_id = $1
 	`
 	err := s.db.QueryRow(query, discordID).Scan(
 		&user.ID, &user.Email, &user.FirstName, &user.LastName,
-		&user.GoogleID, &user.DiscordID, &user.Status, &user.JoinReason, &user.CreatedAt, &user.ApprovedAt, &user.ApprovedBy,
+		&user.OAuthID, &user.DiscordID, &user.Status, &user.JoinReason, &user.CreatedAt, &user.ApprovedAt, &user.ApprovedBy,
 	)
 	return user, err
 }
 
-func (s *Service) getUserByGoogleID(googleID string) (*models.User, error) {
+func (s *Service) getUserByOAuthID(oauthID string) (*models.User, error) {
 	user := &models.User{}
 	query := `
-		SELECT id, email, first_name, last_name, google_id, discord_id, status, join_reason, created_at, approved_at, approved_by
-		FROM users WHERE google_id = $1
+		SELECT id, email, first_name, last_name, oauth_id, discord_id, status, join_reason, created_at, approved_at, approved_by
+		FROM users WHERE oauth_id = $1
 	`
-	err := s.db.QueryRow(query, googleID).Scan(
+	err := s.db.QueryRow(query, oauthID).Scan(
 		&user.ID, &user.Email, &user.FirstName, &user.LastName,
-		&user.GoogleID, &user.DiscordID, &user.Status, &user.JoinReason, &user.CreatedAt, &user.ApprovedAt, &user.ApprovedBy,
+		&user.OAuthID, &user.DiscordID, &user.Status, &user.JoinReason, &user.CreatedAt, &user.ApprovedAt, &user.ApprovedBy,
 	)
 	return user, err
 }
 
-func (s *Service) createUser(googleUser *models.GoogleUserInfo) (*models.User, error) {
+func (s *Service) createUser(oauthUser *models.OAuthUserInfo) (*models.User, error) {
 	status := constants.StatusPending
 	var approvedAt *time.Time
 	var approvedBy *string
 
-	if s.isWiscEmail(googleUser.Email) {
+	if s.isAutoApproveEmail(oauthUser.Email) {
 		status = constants.StatusApproved
 		now := time.Now()
 		approvedAt = &now
 		approvedByStr := constants.AutoApprovedBy
 		approvedBy = &approvedByStr
-		log.Printf("Auto-approved wisc.edu user: %s", googleUser.Email)
+		log.Printf("Auto-approved user: %s", oauthUser.Email)
 	}
 
 	user := &models.User{
-		Email:      googleUser.Email,
-		FirstName:  googleUser.GivenName,
-		LastName:   googleUser.FamilyName,
-		GoogleID:   googleUser.ID,
+		Email:      oauthUser.Email,
+		FirstName:  oauthUser.GivenName,
+		LastName:   oauthUser.FamilyName,
+		OAuthID:    oauthUser.ID,
 		Status:     status,
 		ApprovedAt: approvedAt,
 		ApprovedBy: approvedBy,
 	}
 
 	query := `
-		INSERT INTO users (email, first_name, last_name, google_id, discord_id, status, join_reason, approved_at, approved_by)
+		INSERT INTO users (email, first_name, last_name, oauth_id, discord_id, status, join_reason, approved_at, approved_by)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id, created_at
 	`
 	err := s.db.QueryRow(query, user.Email, user.FirstName, user.LastName,
-		user.GoogleID, user.DiscordID, user.Status, user.JoinReason, user.ApprovedAt, user.ApprovedBy).Scan(&user.ID, &user.CreatedAt)
+		user.OAuthID, user.DiscordID, user.Status, user.JoinReason, user.ApprovedAt, user.ApprovedBy).Scan(&user.ID, &user.CreatedAt)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create user: %w", err)

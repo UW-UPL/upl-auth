@@ -23,7 +23,7 @@ func main() {
 		log.Fatal("Failed to migrate database:", err)
 	}
 
-	discordClient := discord.NewClient(config.DiscordBotToken, config.DiscordGuildID, config.DiscordRoleID)
+	discordClient := discord.NewClient(config.DiscordToken, config.DiscordGuildID, config.DiscordRoleID)
 	authService := auth.NewService(db, discordClient, config)
 
 	gin.SetMode(gin.ReleaseMode)
@@ -39,37 +39,40 @@ func main() {
 }
 
 type Config struct {
-	GoogleClientID     string
-	GoogleClientSecret string
+	OAuthClientID     string
+	OAuthClientSecret string
 	JWTSecret         string
 	DatabaseURL       string
 	BaseURL           string
 	Port              string
-	DiscordBotToken   string
+	DiscordToken      string
 	DiscordGuildID    string
 	DiscordRoleID     string
+	AutoApproveDomains string
 }
 
-func (c *Config) GetGoogleClientID() string     { return c.GoogleClientID }
-func (c *Config) GetGoogleClientSecret() string { return c.GoogleClientSecret }
+func (c *Config) GetOAuthClientID() string     { return c.OAuthClientID }
+func (c *Config) GetOAuthClientSecret() string { return c.OAuthClientSecret }
 func (c *Config) GetJWTSecret() string         { return c.JWTSecret }
 func (c *Config) GetBaseURL() string           { return c.BaseURL }
+func (c *Config) GetAutoApproveDomains() string { return c.AutoApproveDomains }
 
 func loadConfig() *Config {
 	config := &Config{
-		GoogleClientID:     getEnv("GOOGLE_CLIENT_ID", ""),
-		GoogleClientSecret: getEnv("GOOGLE_CLIENT_SECRET", ""),
+		OAuthClientID:     getEnv("OAUTH_CLIENT_ID", ""),
+		OAuthClientSecret: getEnv("OAUTH_CLIENT_SECRET", ""),
 		JWTSecret:         getEnv("JWT_SECRET", ""),
-		DatabaseURL:       getEnv("DATABASE_URL", "postgres://postgres:password@localhost:5432/discord_auth?sslmode=disable"),
+		DatabaseURL:       getEnv("DATABASE_URL", "postgres://postgres:password@localhost:5432/go_forth?sslmode=disable"),
 		BaseURL:           getEnv("BASE_URL", "http://localhost:8080"),
 		Port:              getEnv("PORT", "8080"),
-		DiscordBotToken:   getEnv("DISCORD_BOT_TOKEN", ""),
+		DiscordToken:      getEnv("DISCORD_TOKEN", ""),
 		DiscordGuildID:    getEnv("DISCORD_GUILD_ID", ""),
 		DiscordRoleID:     getEnv("DISCORD_ROLE_ID", ""),
+		AutoApproveDomains: getEnv("AUTO_APPROVE_DOMAINS", ""),
 	}
 
-	if config.GoogleClientID == "" || config.GoogleClientSecret == "" || config.JWTSecret == "" {
-		log.Fatal("Missing required environment variables: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, JWT_SECRET")
+	if config.OAuthClientID == "" || config.OAuthClientSecret == "" || config.JWTSecret == "" {
+		log.Fatal("Missing required environment variables: OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, JWT_SECRET")
 	}
 
 	return config
