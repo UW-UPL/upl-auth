@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html>
-<head>
-    <meta charset="UTF-8">
-    <title>Join Reason Required</title>
-    <style>
+    <head>
+        <meta charset="UTF-8">
+        <title>Join Reason Required</title>
+        <style>
         body { font-family: monospace; max-width: 600px; margin: 40px auto; padding: 20px; }
         pre { border: 1px solid #000; padding: 20px; }
         h1 { text-align: center; }
@@ -13,32 +13,32 @@
         .error, .success { padding: 10px; margin: 10px 0; }
         .error { background: #fee; color: #c00; border: 1px solid #c00; }
         .success { background: #efe; color: #060; border: 1px solid #060; }
-    </style>
-</head>
-<body>
-    <pre>
-AUTH SYSTEM
-===========
-    </pre>
+        </style>
+    </head>
+    <body>
+        <pre>
+            UPL AUTH SYSTEM
+            ===============
+        </pre>
 
-    <h1>JOIN REASON REQUIRED</h1>
+        <h1>JOIN REASON REQUIRED</h1>
 
-    <p><strong>ADDITIONAL INFORMATION NEEDED</strong></p>
+        <p><strong>ADDITIONAL INFORMATION NEEDED</strong></p>
 
-    <div class="form">
-        <p>User: {{.Email}}<br>
-        Name: {{.FirstName}} {{.LastName}}</p>
+        <div class="form">
+            <p>User: {{.Email}}<br>
+                Name: {{.FirstName}} {{.LastName}}</p>
 
-        <p>Please provide a reason for joining:</p>
+            <p>Please provide a reason for joining the UPL:</p>
 
-        <textarea id="joinReason" placeholder="Enter your reason for joining (10-1000 characters)"></textarea>
+            <textarea id="joinReason" placeholder="Enter your reason for joining the UPL (10-1000 characters)"></textarea>
 
-        <div id="message" style="display: none;"></div>
+            <div id="message" style="display: none;"></div>
 
-        <button onclick="submitReason()">Submit</button>
-    </div>
+            <button onclick="submitReason()">Submit</button>
+        </div>
 
-    <script>
+        <script>
         function submitReason() {
             const reason = document.getElementById('joinReason').value.trim();
             const messageDiv = document.getElementById('message');
@@ -58,26 +58,26 @@ AUTH SYSTEM
                     join_reason: reason
                 })
             })
-            .then(response => response.json())
-            .then(data => {
-                if (data.message) {
-                    messageDiv.className = 'success';
-                    messageDiv.textContent = 'Join reason submitted successfully! Redirecting...';
-                    messageDiv.style.display = 'block';
+                .then(response => response.json())
+                .then(data => {
+                    if (data.message) {
+                        messageDiv.className = 'success';
+                        messageDiv.textContent = 'Join reason submitted successfully! Redirecting...';
+                        messageDiv.style.display = 'block';
 
-                    setTimeout(() => {
-                        window.location.href = '/auth/callback?pending=true';
-                    }, 2000);
-                } else {
-                    throw new Error(data.error || 'Failed to submit');
-                }
-            })
-            .catch(error => {
-                messageDiv.className = 'error';
-                messageDiv.textContent = 'Error: ' + error.message;
-                messageDiv.style.display = 'block';
-            });
+                        setTimeout(() => {
+                            window.location.href = '/auth/callback?pending=true';
+                        }, 2000);
+                    } else {
+                        throw new Error(data.error || 'Failed to submit');
+                    }
+                })
+                .catch(error => {
+                    messageDiv.className = 'error';
+                    messageDiv.textContent = 'Error: ' + error.message;
+                    messageDiv.style.display = 'block';
+                });
         }
-    </script>
-</body>
+        </script>
+    </body>
 </html>
