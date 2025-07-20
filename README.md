@@ -1,4 +1,4 @@
-# upl-auth
+# upl-discord-auth
 
 Discord bot that verifies UW-Madison students and assigns roles in the UPL Discord server. Students authenticate with their Google accounts to prove they're real UW students.
 
