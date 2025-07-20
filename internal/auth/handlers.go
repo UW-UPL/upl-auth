@@ -113,7 +113,7 @@ func (s *Service) handleLogin(c *gin.Context) {
 
 func (s *Service) handleCallback(c *gin.Context) {
 	if c.Query("pending") == "true" {
-		// This is a redirect after submitting join reason, just show generic pending message
+		// this is a redirect after submitting join reason -- just show generic pending message
 		templates.RenderPending(c, templates.PendingData{
 			Email:     "Your application",
 			FirstName: "",
@@ -163,12 +163,16 @@ func (s *Service) handleCallback(c *gin.Context) {
 		return
 	}
 
-	// Check if Discord ID is already taken before creating user
+	// check for if Discord ID is already taken before creating user
 	if discordID != "" {
 		existingUser, err := s.getUserByDiscordID(discordID)
 		if err == nil {
-			log.Printf("Discord ID %s already linked to user %d (%s), cannot create new user", discordID, existingUser.ID, existingUser.Email)
-			templates.RenderError(c, templates.ErrorData{Message: constants.MsgDiscordDuplicate})
+			log.Printf("Discord ID %s already linked to user %d (%s) with status %s", discordID, existingUser.ID, existingUser.Email, existingUser.Status)
+			if existingUser.Status == constants.StatusRejected {
+				templates.RenderError(c, templates.ErrorData{Message: "This Discord account has been rejected and cannot be used for verification."})
+			} else {
+				templates.RenderError(c, templates.ErrorData{Message: constants.MsgDiscordDuplicate})
+			}
 			return
 		} else if err != sql.ErrNoRows {
 			log.Printf("Error checking Discord ID: %v", err)
@@ -182,7 +186,11 @@ func (s *Service) handleCallback(c *gin.Context) {
 		log.Printf("CreateOrUpdateUser error: %v", err)
 		if discordID != "" {
 			if strings.Contains(err.Error(), "email already registered") {
-				templates.RenderError(c, templates.ErrorData{Message: "This email address is already registered with another Discord account."})
+				templates.RenderError(c, templates.ErrorData{Message: "This email address is already registered with another Google account."})
+				return
+			}
+			if strings.Contains(err.Error(), "email has been rejected") {
+				templates.RenderError(c, templates.ErrorData{Message: "This email has been rejected and cannot be used for verification."})
 				return
 			}
 			templates.RenderError(c, templates.ErrorData{Message: constants.MsgCreateUserError})
@@ -245,7 +253,7 @@ func (s *Service) handleCallback(c *gin.Context) {
 
 	case constants.StatusApproved:
 		if discordID != "" {
-			// Check if this user already has a different Discord ID linked
+			// check if this user already has a different Discord ID linked
 			if user.DiscordID != nil && *user.DiscordID != "" && *user.DiscordID != discordID {
 				log.Printf("User %d already has Discord ID %s, cannot change to %s", user.ID, *user.DiscordID, discordID)
 				templates.RenderError(c, templates.ErrorData{Message: "This account is already linked to a different Discord ID."})
@@ -515,7 +523,7 @@ func (s *Service) getAdminPasswordHash() string {
 func (s *Service) getPasswordSalt() string {
 	salt := os.Getenv("ADMIN_PASSWORD_SALT")
 	if salt == "" {
-		log.Fatal("ADMIN_PASSWORD_SALT environment variable is required")
+		log.Fatal("ADMIN_PASSWORD environment variable is required")
 	}
 	return salt
 }

@@ -154,6 +154,17 @@ func (s *Service) GetPendingUsers() ([]models.User, error) {
 }
 
 func (s *Service) UpdateUserStatus(userID int, status string, approvedBy string) error {
+	// first check current status
+	currentUser, err := s.getUserByID(userID)
+	if err != nil {
+		return fmt.Errorf("failed to get user: %w", err)
+	}
+
+	// prevent changing status if already rejected
+	if currentUser.Status == constants.StatusRejected && status == constants.StatusApproved {
+		return fmt.Errorf("cannot approve a rejected user")
+	}
+
 	query := `
 		UPDATE users
 		SET status = $1, approved_at = $2, approved_by = $3
@@ -165,7 +176,7 @@ func (s *Service) UpdateUserStatus(userID int, status string, approvedBy string)
 		approvedAt = &now
 	}
 
-	_, err := s.db.Exec(query, status, approvedAt, approvedBy, userID)
+	_, err = s.db.Exec(query, status, approvedAt, approvedBy, userID)
 	if err != nil {
 		return fmt.Errorf("failed to update user status: %w", err)
 	}
