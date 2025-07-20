@@ -72,18 +72,15 @@ docker-compose up -d
 ```
 
 ## Usage
-
-**Users:** Type `/verify` in Discord → Click the link → Sign in → Get role assigned
-**Admins:** Visit `/admin` → Enter password → Approve/reject pending users
+- **Users:** Type `/verify` in Discord → Click the link → Sign in → Get role assigned
+- **Admins:** Visit `/admin` → Enter password → Approve/reject pending users
 
 ## Configuration
-
-**OAuth Provider:** Add callback URL: `https://yourdomain.com/auth/callback`
-**Discord Bot:** Needs "Manage Roles" permission
-**Auto-approve:** Set `AUTO_APPROVE_DOMAINS` for instant approval of specific email domains
+- **OAuth Provider:** Add callback URL: `https://yourdomain.com/auth/callback`
+- **Discord Bot:** Needs "Manage Roles" permission
+- **Auto-approve:** Set `AUTO_APPROVE_DOMAINS` for instant approval of specific email domains
 
 ## Security Features
-
 - One Discord account per person
 - One email per person
 - Rejected users stay rejected
